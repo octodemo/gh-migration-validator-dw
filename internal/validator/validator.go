@@ -675,7 +675,8 @@ func formatCommentDetail(comment api.PRCommentDetail, linkLabel string) string {
 }
 
 func commentComparisonKey(comment api.PRCommentDetail) string {
-	// Normalize whitespace in the body and use an explicit null byte separator to avoid collisions with comment kind text.
+	// Normalize whitespace in the body and use an explicit null byte separator so kind/body boundaries stay unambiguous,
+	// including when a body starts with or contains words such as "issue" or "review".
 	return comment.Kind + "\x00" + strings.Join(strings.Fields(comment.Body), " ")
 }
 
