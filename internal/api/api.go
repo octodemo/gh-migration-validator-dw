@@ -425,6 +425,7 @@ type PRCommentDetail struct {
 	ID   int64
 	Body string
 	Kind string
+	URL  string
 }
 
 // PRCommentDetails holds pull request metadata and comments needed for detailed comparison.
@@ -433,6 +434,15 @@ type PRCommentDetails struct {
 	Number    int
 	CreatedAt time.Time
 	Comments  []PRCommentDetail
+}
+
+// IssueDetail holds the fields needed to compare migrated issues.
+type IssueDetail struct {
+	ID     int64
+	Number int
+	Title  string
+	Body   string
+	URL    string
 }
 
 // GetPRCounts retrieves the counts of pull requests by state for a repository using GraphQL
@@ -479,6 +489,49 @@ func (api *GitHubAPI) GetPRCounts(clientType ClientType, owner, name string) (*P
 	counts.Total = counts.Open + counts.Merged + counts.Closed
 
 	return counts, nil
+}
+
+// GetIssueDetails retrieves issue details for a repository, excluding pull requests.
+func (api *GitHubAPI) GetIssueDetails(clientType ClientType, owner, name string) ([]IssueDetail, error) {
+	ctx := context.Background()
+
+	client, clientName, err := api.getRESTClient(clientType)
+	if err != nil {
+		return nil, err
+	}
+
+	var issueDetails []IssueDetail
+	issueOpts := &github.IssueListByRepoOptions{
+		State:       "all",
+		ListOptions: github.ListOptions{PerPage: 100},
+	}
+
+	for {
+		issues, resp, err := client.Issues.ListByRepo(ctx, owner, name, issueOpts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list %s repository issues for delta comparison: %v", clientName, err)
+		}
+
+		for _, issue := range issues {
+			if issue.IsPullRequest() {
+				continue
+			}
+			issueDetails = append(issueDetails, IssueDetail{
+				ID:     issue.GetID(),
+				Number: issue.GetNumber(),
+				Title:  issue.GetTitle(),
+				Body:   issue.GetBody(),
+				URL:    issue.GetHTMLURL(),
+			})
+		}
+
+		if resp.NextPage == 0 {
+			break
+		}
+		issueOpts.Page = resp.NextPage
+	}
+
+	return issueDetails, nil
 }
 
 // GetPRCommentDetails retrieves issue comments and review comments for every pull request in a repository.
@@ -539,6 +592,7 @@ func (api *GitHubAPI) getPRCommentsForPull(ctx context.Context, client *github.C
 				ID:   comment.GetID(),
 				Body: comment.GetBody(),
 				Kind: "issue",
+				URL:  comment.GetHTMLURL(),
 			})
 		}
 		if resp.NextPage == 0 {
@@ -558,6 +612,7 @@ func (api *GitHubAPI) getPRCommentsForPull(ctx context.Context, client *github.C
 				ID:   comment.GetID(),
 				Body: comment.GetBody(),
 				Kind: "review",
+				URL:  comment.GetHTMLURL(),
 			})
 		}
 		if resp.NextPage == 0 {

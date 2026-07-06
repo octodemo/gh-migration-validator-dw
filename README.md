@@ -64,9 +64,9 @@ gh migration-validator \
   --no-lfs
 ```
 
-### Detailed Missing PR Comment Validation
+### Detailed Delta Validation
 
-Use `--missing-pr-comments` to perform an opt-in comparison of pull request comments. When source PR comments are missing from the target, the report includes each affected PR's age, source/target PR IDs, a count per PR, and the source comment IDs with the first few words of each missing comment.
+Use `--include-delta` to perform an opt-in comparison of issues and pull request comments. When source issues or PR comments are missing from the target, the report includes source links; when target issues or PR comments are duplicated or otherwise extra, the report includes target links.
 
 ```bash
 gh migration-validator \
@@ -76,7 +76,7 @@ gh migration-validator \
   --target-repo "my-repo" \
   --github-source-pat "ghp_xxx" \
   --github-target-pat "ghp_yyy" \
-  --missing-pr-comments
+  --include-delta
 ```
 
 ### Environment Variables
@@ -107,7 +107,7 @@ export GHMV_TARGET_HOSTNAME="https://github.example.com"  # Optional: GitHub Ent
 export GHMV_MARKDOWN_TABLE="true"                  # Output as markdown table
 export GHMV_MARKDOWN_FILE="validation-report.md"   # Write markdown to file
 export GHMV_NO_LFS="true"                          # Skip LFS validation
-export GHMV_MISSING_PR_COMMENTS="true"             # Report missing PR comments with IDs/previews
+export GHMV_INCLUDE_DELTA="true"                   # Report missing/extra issues and PR comments with links
 export GHMV_STRICT_EXIT="true"                     # Exit code 2 on validation failures
 export GHMV_RATE_LIMIT_THRESHOLD="100"             # GitHub API rate limit warning threshold (default: 50, 0 to disable)
 ```
@@ -508,7 +508,7 @@ The tool compares the following metrics between source and target repositories:
 
 - **Issues**: Total count (expects +1 in target for migration log issue)
 - **Pull Requests**: Total, Open, Merged, and Closed counts
-- **Pull Request Comments**: Optional missing comment details by PR with PR age, PR IDs, and comment IDs/previews with `--missing-pr-comments`
+- **Issues and Pull Request Comments**: Optional missing/extra delta details with source or target links using `--include-delta`
 - **Tags**: Total count of Git tags
 - **Releases**: Total count of GitHub releases
 - **Commits**: Total commit count on default branch
