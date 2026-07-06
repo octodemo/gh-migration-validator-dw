@@ -221,6 +221,14 @@ func TestValidateRepositoryData_MissingPRComments(t *testing.T) {
 		Name:  "test-repo",
 		PRs:   &api.PRCounts{Total: 2, Open: 1, Merged: 1, Closed: 0},
 		PRComments: map[int]api.PRCommentDetails{
+			2: {
+				ID:        1002,
+				Number:    2,
+				CreatedAt: time.Now().Add(-73 * time.Hour),
+				Comments: []api.PRCommentDetail{
+					{ID: 201, Kind: "issue", Body: "Another missing discussion comment with extra words"},
+				},
+			},
 			1: {
 				ID:        1001,
 				Number:    1,
@@ -228,14 +236,6 @@ func TestValidateRepositoryData_MissingPRComments(t *testing.T) {
 				Comments: []api.PRCommentDetail{
 					{ID: 101, Kind: "issue", Body: "This comment was migrated successfully"},
 					{ID: 102, Kind: "review", Body: "This review comment did not migrate"},
-				},
-			},
-			2: {
-				ID:        1002,
-				Number:    2,
-				CreatedAt: time.Now().Add(-73 * time.Hour),
-				Comments: []api.PRCommentDetail{
-					{ID: 201, Kind: "issue", Body: "Another missing discussion comment with extra words"},
 				},
 			},
 		},
