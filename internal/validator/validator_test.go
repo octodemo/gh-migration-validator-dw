@@ -303,10 +303,24 @@ func TestValidateRepositoryData_PRCommentsSkippedByDefault(t *testing.T) {
 	}
 }
 
-func TestCommentPreviewTruncatesToMaxWords(t *testing.T) {
-	body := "one two three four five six seven eight nine ten"
+func TestCommentPreview(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "empty", body: "", want: ""},
+		{name: "single word", body: "one", want: "one"},
+		{name: "exact max words", body: "one two three four five six seven eight", want: "one two three four five six seven eight"},
+		{name: "truncates over max words", body: "one two three four five six seven eight nine ten", want: "one two three four five six seven eight"},
+		{name: "normalizes whitespace", body: " one\ttwo\nthree  four ", want: "one two three four"},
+	}
 
-	assert.Equal(t, "one two three four five six seven eight", commentPreview(body))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, commentPreview(tt.body))
+		})
+	}
 }
 
 func TestValidateRepositoryData_ExtraData(t *testing.T) {
