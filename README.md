@@ -66,7 +66,7 @@ gh migration-validator \
 
 ### Detailed Missing PR Comment Validation
 
-Use `--missing-pr-comments` to perform an opt-in comparison of pull request comments. When source PR comments are missing from the target, the report includes a count per PR and lists the source comment IDs with the first few words of each missing comment.
+Use `--missing-pr-comments` to perform an opt-in comparison of pull request comments. When source PR comments are missing from the target, the report includes each affected PR's age, source/target PR IDs, a count per PR, and the source comment IDs with the first few words of each missing comment.
 
 ```bash
 gh migration-validator \
@@ -508,7 +508,7 @@ The tool compares the following metrics between source and target repositories:
 
 - **Issues**: Total count (expects +1 in target for migration log issue)
 - **Pull Requests**: Total, Open, Merged, and Closed counts
-- **Pull Request Comments**: Optional missing comment details by PR with `--missing-pr-comments`
+- **Pull Request Comments**: Optional missing comment details by PR with PR age, PR IDs, and comment IDs/previews with `--missing-pr-comments`
 - **Tags**: Total count of Git tags
 - **Releases**: Total count of GitHub releases
 - **Commits**: Total commit count on default branch

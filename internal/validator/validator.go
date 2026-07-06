@@ -60,7 +60,7 @@ type RepositoryData struct {
 	Name                  string
 	Issues                int
 	PRs                   *api.PRCounts
-	PRComments            map[int][]api.PRCommentDetail
+	PRComments            map[int]api.PRCommentDetails
 	Tags                  int
 	Releases              int
 	CommitCount           int
@@ -524,15 +524,17 @@ func (mv *MigrationValidator) ValidateWithOptions(targetOwner, targetRepo string
 	return results, nil
 }
 
-func clonePRComments(comments map[int][]api.PRCommentDetail) map[int][]api.PRCommentDetail {
-	clone := make(map[int][]api.PRCommentDetail, len(comments))
+func clonePRComments(comments map[int]api.PRCommentDetails) map[int]api.PRCommentDetails {
+	clone := make(map[int]api.PRCommentDetails, len(comments))
 	for prNumber, prComments := range comments {
-		clone[prNumber] = append([]api.PRCommentDetail(nil), prComments...)
+		commentsCopy := prComments
+		commentsCopy.Comments = append([]api.PRCommentDetail(nil), prComments.Comments...)
+		clone[prNumber] = commentsCopy
 	}
 	return clone
 }
 
-func comparePRComments(source, target map[int][]api.PRCommentDetail) (int, int, int, []string) {
+func comparePRComments(source, target map[int]api.PRCommentDetails) (int, int, int, []string) {
 	sourceTotal := countPRComments(source)
 	targetTotal := countPRComments(target)
 	var missingTotal int
@@ -545,7 +547,9 @@ func comparePRComments(source, target map[int][]api.PRCommentDetail) (int, int, 
 	sort.Ints(prNumbers)
 
 	for _, prNumber := range prNumbers {
-		missing := missingPRCommentsForPR(source[prNumber], target[prNumber])
+		sourcePR := source[prNumber]
+		targetPR := target[prNumber]
+		missing := missingPRCommentsForPR(sourcePR.Comments, targetPR.Comments)
 		if len(missing) == 0 {
 			continue
 		}
@@ -555,18 +559,42 @@ func comparePRComments(source, target map[int][]api.PRCommentDetail) (int, int, 
 		for _, comment := range missing {
 			detailParts = append(detailParts, fmt.Sprintf("%s %d %q", comment.Kind, comment.ID, commentPreview(comment.Body)))
 		}
-		details = append(details, fmt.Sprintf("PR #%d: %d missing (%s)", prNumber, len(missing), strings.Join(detailParts, "; ")))
+		details = append(details, fmt.Sprintf("PR #%d (source ID %d, target ID %s, age %s): %d missing (%s)",
+			prNumber,
+			sourcePR.ID,
+			formatTargetPRID(targetPR.ID),
+			formatPRAge(sourcePR.CreatedAt, time.Now()),
+			len(missing),
+			strings.Join(detailParts, "; ")))
 	}
 
 	return sourceTotal, targetTotal, missingTotal, details
 }
 
-func countPRComments(comments map[int][]api.PRCommentDetail) int {
+func countPRComments(comments map[int]api.PRCommentDetails) int {
 	var total int
-	for _, prComments := range comments {
-		total += len(prComments)
+	for _, prDetails := range comments {
+		total += len(prDetails.Comments)
 	}
 	return total
+}
+
+func formatTargetPRID(id int64) string {
+	if id == 0 {
+		return "not found"
+	}
+	return fmt.Sprintf("%d", id)
+}
+
+func formatPRAge(createdAt, now time.Time) string {
+	if createdAt.IsZero() {
+		return "unknown"
+	}
+	if now.Before(createdAt) {
+		return "0d"
+	}
+	days := int(now.Sub(createdAt).Hours() / 24)
+	return fmt.Sprintf("%dd", days)
 }
 
 func missingPRCommentsForPR(source, target []api.PRCommentDetail) []api.PRCommentDetail {

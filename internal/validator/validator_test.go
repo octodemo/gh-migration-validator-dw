@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/pterm/pterm"
 	"github.com/spf13/viper"
@@ -219,13 +220,23 @@ func TestValidateRepositoryData_MissingPRComments(t *testing.T) {
 		Owner: "source-org",
 		Name:  "test-repo",
 		PRs:   &api.PRCounts{Total: 2, Open: 1, Merged: 1, Closed: 0},
-		PRComments: map[int][]api.PRCommentDetail{
+		PRComments: map[int]api.PRCommentDetails{
 			1: {
-				{ID: 101, Kind: "issue", Body: "This comment was migrated successfully"},
-				{ID: 102, Kind: "review", Body: "This review comment did not migrate"},
+				ID:        1001,
+				Number:    1,
+				CreatedAt: time.Now().Add(-49 * time.Hour),
+				Comments: []api.PRCommentDetail{
+					{ID: 101, Kind: "issue", Body: "This comment was migrated successfully"},
+					{ID: 102, Kind: "review", Body: "This review comment did not migrate"},
+				},
 			},
 			2: {
-				{ID: 201, Kind: "issue", Body: "Another missing discussion comment with extra words"},
+				ID:        1002,
+				Number:    2,
+				CreatedAt: time.Now().Add(-73 * time.Hour),
+				Comments: []api.PRCommentDetail{
+					{ID: 201, Kind: "issue", Body: "Another missing discussion comment with extra words"},
+				},
 			},
 		},
 	}
@@ -233,9 +244,13 @@ func TestValidateRepositoryData_MissingPRComments(t *testing.T) {
 		Owner: "target-org",
 		Name:  "test-repo",
 		PRs:   &api.PRCounts{Total: 2, Open: 1, Merged: 1, Closed: 0},
-		PRComments: map[int][]api.PRCommentDetail{
+		PRComments: map[int]api.PRCommentDetails{
 			1: {
-				{ID: 901, Kind: "issue", Body: "This comment was migrated successfully"},
+				ID:     9001,
+				Number: 1,
+				Comments: []api.PRCommentDetail{
+					{ID: 901, Kind: "issue", Body: "This comment was migrated successfully"},
+				},
 			},
 		},
 	}
@@ -257,8 +272,8 @@ func TestValidateRepositoryData_MissingPRComments(t *testing.T) {
 		assert.Equal(t, 1, commentResult.TargetVal)
 		assert.Equal(t, 2, commentResult.Difference)
 		assert.Equal(t, []string{
-			`PR #1: 1 missing (review 102 "This review comment did not migrate")`,
-			`PR #2: 1 missing (issue 201 "Another missing discussion comment with extra words")`,
+			`PR #1 (source ID 1001, target ID 9001, age 2d): 1 missing (review 102 "This review comment did not migrate")`,
+			`PR #2 (source ID 1002, target ID not found, age 3d): 1 missing (issue 201 "Another missing discussion comment with extra words")`,
 		}, commentResult.Details)
 	}
 }
@@ -272,13 +287,13 @@ func TestValidateRepositoryData_PRCommentsSkippedByDefault(t *testing.T) {
 		Owner:      "source-org",
 		Name:       "test-repo",
 		PRs:        &api.PRCounts{Total: 1, Open: 0, Merged: 1, Closed: 0},
-		PRComments: map[int][]api.PRCommentDetail{1: {{ID: 101, Kind: "issue", Body: "missing"}}},
+		PRComments: map[int]api.PRCommentDetails{1: {ID: 1001, Number: 1, Comments: []api.PRCommentDetail{{ID: 101, Kind: "issue", Body: "missing"}}}},
 	}
 	targetData := &RepositoryData{
 		Owner:      "target-org",
 		Name:       "test-repo",
 		PRs:        &api.PRCounts{Total: 1, Open: 0, Merged: 1, Closed: 0},
-		PRComments: map[int][]api.PRCommentDetail{},
+		PRComments: map[int]api.PRCommentDetails{},
 	}
 
 	validator := setupTestValidator(sourceData, targetData)

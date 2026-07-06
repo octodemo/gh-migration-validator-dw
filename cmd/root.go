@@ -83,7 +83,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("markdown-table", "m", false, "Print results as a markdown table")
 	rootCmd.PersistentFlags().String("markdown-file", "", "Write markdown output to the specified file (optional)")
 	rootCmd.PersistentFlags().Bool("no-lfs", false, "Skip LFS object validation")
-	rootCmd.PersistentFlags().Bool("missing-pr-comments", false, "Count missing pull request comments and list source comment IDs with previews")
+	rootCmd.PersistentFlags().Bool("missing-pr-comments", false, "Count missing pull request comments and list PR age, PR IDs, and source comment IDs with previews")
 	rootCmd.PersistentFlags().Bool("strict-exit", false, "Exit with status 2 when validations fail")
 
 	// Set environment variable prefix: GHMV (GitHub Migration Validator)

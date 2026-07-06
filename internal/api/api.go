@@ -427,6 +427,14 @@ type PRCommentDetail struct {
 	Kind string
 }
 
+// PRCommentDetails holds pull request metadata and comments needed for detailed comparison.
+type PRCommentDetails struct {
+	ID        int64
+	Number    int
+	CreatedAt time.Time
+	Comments  []PRCommentDetail
+}
+
 // GetPRCounts retrieves the counts of pull requests by state for a repository using GraphQL
 func (api *GitHubAPI) GetPRCounts(clientType ClientType, owner, name string) (*PRCounts, error) {
 	ctx := context.Background()
@@ -474,7 +482,7 @@ func (api *GitHubAPI) GetPRCounts(clientType ClientType, owner, name string) (*P
 }
 
 // GetPRCommentDetails retrieves issue comments and review comments for every pull request in a repository.
-func (api *GitHubAPI) GetPRCommentDetails(clientType ClientType, owner, name string) (map[int][]PRCommentDetail, error) {
+func (api *GitHubAPI) GetPRCommentDetails(clientType ClientType, owner, name string) (map[int]PRCommentDetails, error) {
 	ctx := context.Background()
 
 	client, clientName, err := api.getRESTClient(clientType)
@@ -482,7 +490,7 @@ func (api *GitHubAPI) GetPRCommentDetails(clientType ClientType, owner, name str
 		return nil, err
 	}
 
-	prComments := make(map[int][]PRCommentDetail)
+	prComments := make(map[int]PRCommentDetails)
 	prOpts := &github.PullRequestListOptions{
 		State:       "all",
 		ListOptions: github.ListOptions{PerPage: 100},
@@ -500,7 +508,12 @@ func (api *GitHubAPI) GetPRCommentDetails(clientType ClientType, owner, name str
 			if err != nil {
 				return nil, fmt.Errorf("failed to list %s repository pull request #%d comments: %v", clientName, number, err)
 			}
-			prComments[number] = comments
+			prComments[number] = PRCommentDetails{
+				ID:        pull.GetID(),
+				Number:    number,
+				CreatedAt: pull.GetCreatedAt().Time,
+				Comments:  comments,
+			}
 		}
 
 		if resp.NextPage == 0 {
