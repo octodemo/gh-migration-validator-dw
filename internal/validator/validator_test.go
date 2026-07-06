@@ -425,6 +425,15 @@ func TestCommentPreview(t *testing.T) {
 	}
 }
 
+func TestFormatPRAge(t *testing.T) {
+	now := time.Date(2026, 7, 6, 16, 30, 0, 0, time.UTC)
+
+	assert.Equal(t, "2d", formatPRAge(now.Add(-49*time.Hour), now))
+	assert.Equal(t, "3d", formatPRAge(now.Add(-73*time.Hour), now))
+	assert.Equal(t, "0d", formatPRAge(now.Add(time.Hour), now))
+	assert.Equal(t, "unknown", formatPRAge(time.Time{}, now))
+}
+
 func TestValidateRepositoryData_ExtraData(t *testing.T) {
 	sourceData := &RepositoryData{
 		Owner:                 "source-org",
