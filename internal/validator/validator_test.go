@@ -226,7 +226,7 @@ func TestValidateRepositoryData_MissingPRCommentsWithIncludeDelta(t *testing.T) 
 				Number:    2,
 				CreatedAt: time.Now().Add(-73 * time.Hour),
 				Comments: []api.PRCommentDetail{
-					{ID: 201, Kind: "issue", Body: "Another missing discussion comment with extra words", URL: "https://source.example/pr/2#issuecomment-201"},
+					{ID: 201, Kind: "issue", Body: "Another missing issue comment with extra words", URL: "https://source.example/pr/2#issuecomment-201"},
 				},
 			},
 			1: {
@@ -273,7 +273,7 @@ func TestValidateRepositoryData_MissingPRCommentsWithIncludeDelta(t *testing.T) 
 		assert.Equal(t, 2, commentResult.Difference)
 		assert.Equal(t, []string{
 			`PR #1 (source ID 1001, target ID 9001, age 2d): 1 missing (review 102 "This review comment did not migrate" (source: https://source.example/pr/1#discussion_r102))`,
-			`PR #2 (source ID 1002, target ID not found, age 3d): 1 missing (issue 201 "Another missing discussion comment with extra words" (source: https://source.example/pr/2#issuecomment-201))`,
+			`PR #2 (source ID 1002, target ID not found, age 3d): 1 missing (issue 201 "Another missing issue comment with extra words" (source: https://source.example/pr/2#issuecomment-201))`,
 		}, commentResult.Details)
 	}
 }
