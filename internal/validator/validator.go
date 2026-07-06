@@ -39,6 +39,8 @@ const ValidationStatusMessageInfo = "ℹ️ INFO"
 // MigrationLogIssueOffset represents the additional issue created during migration
 const MigrationLogIssueOffset = 1
 
+const maxCommentPreviewWords = 8
+
 // getValidationStatus returns both display string and enum value based on difference
 // diff > 0: target has fewer items than source (FAIL)
 // diff < 0: target has more items than source (WARN)
@@ -625,8 +627,8 @@ func commentPreview(body string) string {
 	if len(words) == 0 {
 		return ""
 	}
-	if len(words) > 8 {
-		words = words[:8]
+	if len(words) > maxCommentPreviewWords {
+		words = words[:maxCommentPreviewWords]
 	}
 	return strings.Join(words, " ")
 }
