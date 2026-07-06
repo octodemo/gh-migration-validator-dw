@@ -718,6 +718,8 @@ func missingIssues(source, target []api.IssueDetail) []api.IssueDetail {
 }
 
 func removeExpectedMigrationLogIssue(extra []api.IssueDetail) []api.IssueDetail {
+	// The standard issue count allows exactly one migration log issue, so remove only one match;
+	// duplicate migration log issues should remain visible as extra target issues.
 	for i, issue := range extra {
 		if isMigrationLogIssue(issue) {
 			return append(extra[:i], extra[i+1:]...)
