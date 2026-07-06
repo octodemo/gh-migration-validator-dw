@@ -26,7 +26,6 @@ func resetViperAndEnv() {
 		"GHMV_MARKDOWN_TABLE",
 		"GHMV_MARKDOWN_FILE",
 		"GHMV_INCLUDE_DELTA",
-		"GHMV_MISSING_PR_COMMENTS",
 		"GHMV_STRICT_EXIT",
 	}
 	for _, env := range envVars {
@@ -49,7 +48,6 @@ func setupViperWithFlags(cmd *cobra.Command) {
 	viper.BindPFlag("MARKDOWN_TABLE", cmd.Flags().Lookup("markdown-table"))
 	viper.BindPFlag("MARKDOWN_FILE", cmd.Flags().Lookup("markdown-file"))
 	viper.BindPFlag("INCLUDE_DELTA", cmd.Flags().Lookup("include-delta"))
-	viper.BindPFlag("MISSING_PR_COMMENTS", cmd.Flags().Lookup("missing-pr-comments"))
 	viper.BindPFlag("STRICT_EXIT", cmd.Flags().Lookup("strict-exit"))
 }
 
@@ -72,7 +70,6 @@ func createTestCommand() *cobra.Command {
 	cmd.Flags().BoolP("markdown-table", "m", false, "Markdown table")
 	cmd.Flags().String("markdown-file", "", "Markdown output file")
 	cmd.Flags().Bool("include-delta", false, "Include delta")
-	cmd.Flags().Bool("missing-pr-comments", false, "Missing PR comments")
 	cmd.Flags().Bool("strict-exit", false, "Strict exit")
 
 	return cmd

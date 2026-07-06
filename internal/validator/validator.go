@@ -496,12 +496,6 @@ func (mv *MigrationValidator) ValidateWithOptions(targetOwner, targetRepo string
 	}
 	defer viper.Set("NO_LFS", previousNoLFS)
 
-	previousMissingPRComments := viper.GetBool("MISSING_PR_COMMENTS")
-	if opts.SkipPRComments {
-		viper.Set("MISSING_PR_COMMENTS", false)
-	}
-	defer viper.Set("MISSING_PR_COMMENTS", previousMissingPRComments)
-
 	// Validate access to target repository before starting
 	fmt.Println("Validating repository access...")
 	if err := mv.api.ValidateRepoAccess(api.TargetClient, targetOwner, targetRepo); err != nil {
@@ -553,7 +547,7 @@ func clonePRComments(comments map[int]api.PRCommentDetails) map[int]api.PRCommen
 }
 
 func includeDeltaEnabled() bool {
-	return viper.GetBool("INCLUDE_DELTA") || viper.GetBool("MISSING_PR_COMMENTS")
+	return viper.GetBool("INCLUDE_DELTA")
 }
 
 func comparePRComments(source, target map[int]api.PRCommentDetails) (int, int, int, int, []string) {

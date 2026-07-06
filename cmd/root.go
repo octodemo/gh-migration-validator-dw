@@ -84,7 +84,6 @@ func init() {
 	rootCmd.PersistentFlags().String("markdown-file", "", "Write markdown output to the specified file (optional)")
 	rootCmd.PersistentFlags().Bool("no-lfs", false, "Skip LFS object validation")
 	rootCmd.PersistentFlags().Bool("include-delta", false, "Include missing and extra issue/comment details with source or target links")
-	rootCmd.PersistentFlags().Bool("missing-pr-comments", false, "Deprecated alias for --include-delta")
 	rootCmd.PersistentFlags().Bool("strict-exit", false, "Exit with status 2 when validations fail")
 
 	// Set environment variable prefix: GHMV (GitHub Migration Validator)
@@ -107,7 +106,6 @@ func init() {
 	viper.BindPFlag("MARKDOWN_FILE", rootCmd.PersistentFlags().Lookup("markdown-file"))
 	viper.BindPFlag("NO_LFS", rootCmd.PersistentFlags().Lookup("no-lfs"))
 	viper.BindPFlag("INCLUDE_DELTA", rootCmd.PersistentFlags().Lookup("include-delta"))
-	viper.BindPFlag("MISSING_PR_COMMENTS", rootCmd.PersistentFlags().Lookup("missing-pr-comments"))
 	viper.BindPFlag("STRICT_EXIT", rootCmd.PersistentFlags().Lookup("strict-exit"))
 
 	// Bind environment variables explicitly for additional app authentication options
@@ -119,7 +117,6 @@ func init() {
 	viper.BindEnv("TARGET_INSTALLATION_ID")
 	viper.BindEnv("MARKDOWN_FILE")
 	viper.BindEnv("INCLUDE_DELTA")
-	viper.BindEnv("MISSING_PR_COMMENTS")
 	viper.BindEnv("STRICT_EXIT")
 }
 

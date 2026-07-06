@@ -378,11 +378,8 @@ func TestValidateRepositoryData_IssueDeltas(t *testing.T) {
 }
 
 func TestValidateRepositoryData_PRCommentsSkippedByDefault(t *testing.T) {
-	previous := viper.GetBool("MISSING_PR_COMMENTS")
 	previousIncludeDelta := viper.GetBool("INCLUDE_DELTA")
-	viper.Set("MISSING_PR_COMMENTS", false)
 	viper.Set("INCLUDE_DELTA", false)
-	defer viper.Set("MISSING_PR_COMMENTS", previous)
 	defer viper.Set("INCLUDE_DELTA", previousIncludeDelta)
 
 	sourceData := &RepositoryData{
