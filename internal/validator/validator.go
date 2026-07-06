@@ -9,6 +9,7 @@ import (
 	"mona-actions/gh-migration-validator/internal/output"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -59,6 +60,7 @@ type RepositoryData struct {
 	Name                  string
 	Issues                int
 	PRs                   *api.PRCounts
+	PRComments            map[int][]api.PRCommentDetail
 	Tags                  int
 	Releases              int
 	CommitCount           int
@@ -77,6 +79,7 @@ type ValidationResult struct {
 	Status     string           // "✅ PASS", "❌ FAIL", "⚠️ WARN" - for display
 	StatusType ValidationStatus // Pass, Fail, Warn - for logic/testing
 	Difference int              // How many items are missing in target (negative if target has more)
+	Details    []string         // Optional detail lines for validations that need extra context
 }
 
 // HasFailures reports whether any validation result failed so callers can set exit codes accurately.
@@ -102,6 +105,7 @@ type ValidationOptions struct {
 	SkipIssues                bool   // BBS has no native issues
 	SkipReleases              bool   // BBS has no releases
 	SkipLFS                   bool   // Skip LFS validation
+	SkipPRComments            bool   // Skip detailed PR comment validation
 	SkipMigrationLogOffset    bool   // Don't add +1 for migration log issue
 	SkipMigrationArchive      bool   // Skip migration archive comparisons (non-GitHub sources)
 	BranchPermissionsAdvisory bool   // Show as INFO instead of PASS/FAIL
@@ -256,6 +260,19 @@ func (mv *MigrationValidator) retrieveSource(owner, name string, spinner *pterm.
 		successfulRequests++
 	}
 
+	if viper.GetBool("MISSING_PR_COMMENTS") {
+		spinner.UpdateText(fmt.Sprintf("Fetching pull request comments from %s/%s...", owner, name))
+		prComments, err := mv.api.GetPRCommentDetails(api.SourceClient, owner, name)
+		if err != nil {
+			failedRequests = append(failedRequests, "pull request comments")
+			errorMessages = append(errorMessages, fmt.Sprintf("pull request comments: %v", err))
+			mv.SourceData.PRComments = nil
+		} else {
+			mv.SourceData.PRComments = prComments
+			successfulRequests++
+		}
+	}
+
 	// Get tag count
 	spinner.UpdateText(fmt.Sprintf("Fetching tags from %s/%s...", owner, name))
 	tags, err := mv.api.GetTagCount(api.SourceClient, owner, name)
@@ -378,6 +395,10 @@ func (mv *MigrationValidator) SetSourceDataFromExport(exportData *RepositoryData
 		sourceDataCopy.PRs = &prCountsCopy
 	}
 
+	if exportData.PRComments != nil {
+		sourceDataCopy.PRComments = clonePRComments(exportData.PRComments)
+	}
+
 	mv.SourceData = &sourceDataCopy
 }
 
@@ -458,6 +479,12 @@ func (mv *MigrationValidator) ValidateWithOptions(targetOwner, targetRepo string
 	}
 	defer viper.Set("NO_LFS", previousNoLFS)
 
+	previousMissingPRComments := viper.GetBool("MISSING_PR_COMMENTS")
+	if opts.SkipPRComments {
+		viper.Set("MISSING_PR_COMMENTS", false)
+	}
+	defer viper.Set("MISSING_PR_COMMENTS", previousMissingPRComments)
+
 	// Validate access to target repository before starting
 	fmt.Println("Validating repository access...")
 	if err := mv.api.ValidateRepoAccess(api.TargetClient, targetOwner, targetRepo); err != nil {
@@ -495,6 +522,85 @@ func (mv *MigrationValidator) ValidateWithOptions(targetOwner, targetRepo string
 
 	fmt.Println("Migration validation completed!")
 	return results, nil
+}
+
+func clonePRComments(comments map[int][]api.PRCommentDetail) map[int][]api.PRCommentDetail {
+	clone := make(map[int][]api.PRCommentDetail, len(comments))
+	for prNumber, prComments := range comments {
+		clone[prNumber] = append([]api.PRCommentDetail(nil), prComments...)
+	}
+	return clone
+}
+
+func comparePRComments(source, target map[int][]api.PRCommentDetail) (int, int, int, []string) {
+	sourceTotal := countPRComments(source)
+	targetTotal := countPRComments(target)
+	var missingTotal int
+	var details []string
+
+	prNumbers := make([]int, 0, len(source))
+	for prNumber := range source {
+		prNumbers = append(prNumbers, prNumber)
+	}
+	sort.Ints(prNumbers)
+
+	for _, prNumber := range prNumbers {
+		missing := missingPRCommentsForPR(source[prNumber], target[prNumber])
+		if len(missing) == 0 {
+			continue
+		}
+
+		missingTotal += len(missing)
+		detailParts := make([]string, 0, len(missing))
+		for _, comment := range missing {
+			detailParts = append(detailParts, fmt.Sprintf("%s %d %q", comment.Kind, comment.ID, commentPreview(comment.Body)))
+		}
+		details = append(details, fmt.Sprintf("PR #%d: %d missing (%s)", prNumber, len(missing), strings.Join(detailParts, "; ")))
+	}
+
+	return sourceTotal, targetTotal, missingTotal, details
+}
+
+func countPRComments(comments map[int][]api.PRCommentDetail) int {
+	var total int
+	for _, prComments := range comments {
+		total += len(prComments)
+	}
+	return total
+}
+
+func missingPRCommentsForPR(source, target []api.PRCommentDetail) []api.PRCommentDetail {
+	targetCounts := make(map[string]int, len(target))
+	for _, comment := range target {
+		targetCounts[commentComparisonKey(comment)]++
+	}
+
+	var missing []api.PRCommentDetail
+	for _, comment := range source {
+		key := commentComparisonKey(comment)
+		if targetCounts[key] > 0 {
+			targetCounts[key]--
+			continue
+		}
+		missing = append(missing, comment)
+	}
+
+	return missing
+}
+
+func commentComparisonKey(comment api.PRCommentDetail) string {
+	return comment.Kind + "\x00" + strings.Join(strings.Fields(comment.Body), " ")
+}
+
+func commentPreview(body string) string {
+	words := strings.Fields(body)
+	if len(words) == 0 {
+		return ""
+	}
+	if len(words) > 8 {
+		words = words[:8]
+	}
+	return strings.Join(words, " ")
 }
 
 // validateRepositoryData compares source and target repository data with configurable options.
@@ -537,6 +643,26 @@ func (mv *MigrationValidator) validateRepositoryData(opts ValidationOptions) []V
 		StatusType: prStatusType,
 		Difference: prDiff,
 	})
+
+	if viper.GetBool("MISSING_PR_COMMENTS") && !opts.SkipPRComments && mv.SourceData.PRComments != nil && mv.TargetData.PRComments != nil {
+		sourceComments, targetComments, missingComments, details := comparePRComments(mv.SourceData.PRComments, mv.TargetData.PRComments)
+		commentStatus := ValidationStatusMessagePass
+		commentStatusType := ValidationStatusPass
+		if missingComments > 0 {
+			commentStatus = ValidationStatusMessageFail
+			commentStatusType = ValidationStatusFail
+		}
+
+		results = append(results, ValidationResult{
+			Metric:     "Pull Request Comments",
+			SourceVal:  sourceComments,
+			TargetVal:  targetComments,
+			Status:     commentStatus,
+			StatusType: commentStatusType,
+			Difference: missingComments,
+			Details:    details,
+		})
+	}
 
 	// Compare Open PRs
 	openPRDiff := mv.SourceData.PRs.Open - mv.TargetData.PRs.Open
@@ -819,6 +945,19 @@ func (mv *MigrationValidator) retrieveTarget(owner, name string, spinner *pterm.
 		successfulRequests++
 	}
 
+	if viper.GetBool("MISSING_PR_COMMENTS") {
+		spinner.UpdateText(fmt.Sprintf("Fetching pull request comments from %s/%s...", owner, name))
+		prComments, err := mv.api.GetPRCommentDetails(api.TargetClient, owner, name)
+		if err != nil {
+			failedRequests = append(failedRequests, "pull request comments")
+			errorMessages = append(errorMessages, fmt.Sprintf("pull request comments: %v", err))
+			mv.TargetData.PRComments = nil
+		} else {
+			mv.TargetData.PRComments = prComments
+			successfulRequests++
+		}
+	}
+
 	// Get tag count
 	spinner.UpdateText(fmt.Sprintf("Fetching tags from %s/%s...", owner, name))
 	tags, err := mv.api.GetTagCount(api.TargetClient, owner, name)
@@ -1049,6 +1188,22 @@ func (mv *MigrationValidator) displayValidationTable(title string, results []Val
 	// Create and display the table
 	table := pterm.DefaultTable.WithHasHeader().WithData(tableData)
 	table.Render()
+	mv.displayValidationDetails(results)
+}
+
+func (mv *MigrationValidator) displayValidationDetails(results []ValidationResult) {
+	for _, result := range results {
+		if len(result.Details) == 0 {
+			continue
+		}
+
+		pterm.DefaultSection.Println(result.Metric + " Details")
+		for _, detail := range result.Details {
+			pterm.DefaultBulletList.WithItems([]pterm.BulletListItem{
+				{Level: 0, Text: detail},
+			}).Render()
+		}
+	}
 }
 
 // displayValidationSummary calculates and displays the overall validation summary
@@ -1156,6 +1311,24 @@ func (mv *MigrationValidator) printMarkdownTable(results []ValidationResult, opt
 			result.SourceVal,
 			result.TargetVal,
 			diffStr)
+	}
+
+	wroteDetailsHeader := false
+	for _, result := range results {
+		if len(result.Details) == 0 {
+			continue
+		}
+		if !wroteDetailsHeader {
+			fmt.Fprintln(writer)
+			fmt.Fprintln(writer, "## Details")
+			fmt.Fprintln(writer)
+			wroteDetailsHeader = true
+		}
+		fmt.Fprintf(writer, "### %s\n\n", result.Metric)
+		for _, detail := range result.Details {
+			fmt.Fprintf(writer, "- %s\n", detail)
+		}
+		fmt.Fprintln(writer)
 	}
 
 	// Calculate summary for markdown

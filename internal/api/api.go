@@ -420,6 +420,13 @@ type PRCounts struct {
 	Total  int
 }
 
+// PRCommentDetail holds the fields needed to compare migrated pull request comments.
+type PRCommentDetail struct {
+	ID   int64
+	Body string
+	Kind string
+}
+
 // GetPRCounts retrieves the counts of pull requests by state for a repository using GraphQL
 func (api *GitHubAPI) GetPRCounts(clientType ClientType, owner, name string) (*PRCounts, error) {
 	ctx := context.Background()
@@ -464,6 +471,89 @@ func (api *GitHubAPI) GetPRCounts(clientType ClientType, owner, name string) (*P
 	counts.Total = counts.Open + counts.Merged + counts.Closed
 
 	return counts, nil
+}
+
+// GetPRCommentDetails retrieves issue comments and review comments for every pull request in a repository.
+func (api *GitHubAPI) GetPRCommentDetails(clientType ClientType, owner, name string) (map[int][]PRCommentDetail, error) {
+	ctx := context.Background()
+
+	client, clientName, err := api.getRESTClient(clientType)
+	if err != nil {
+		return nil, err
+	}
+
+	prComments := make(map[int][]PRCommentDetail)
+	prOpts := &github.PullRequestListOptions{
+		State:       "all",
+		ListOptions: github.ListOptions{PerPage: 100},
+	}
+
+	for {
+		pulls, resp, err := client.PullRequests.List(ctx, owner, name, prOpts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list %s repository pull requests for comments: %v", clientName, err)
+		}
+
+		for _, pull := range pulls {
+			number := pull.GetNumber()
+			comments, err := api.getPRCommentsForPull(ctx, client, owner, name, number)
+			if err != nil {
+				return nil, fmt.Errorf("failed to list %s repository pull request #%d comments: %v", clientName, number, err)
+			}
+			prComments[number] = comments
+		}
+
+		if resp.NextPage == 0 {
+			break
+		}
+		prOpts.Page = resp.NextPage
+	}
+
+	return prComments, nil
+}
+
+func (api *GitHubAPI) getPRCommentsForPull(ctx context.Context, client *github.Client, owner, name string, number int) ([]PRCommentDetail, error) {
+	var comments []PRCommentDetail
+
+	issueOpts := &github.IssueListCommentsOptions{ListOptions: github.ListOptions{PerPage: 100}}
+	for {
+		issueComments, resp, err := client.Issues.ListComments(ctx, owner, name, number, issueOpts)
+		if err != nil {
+			return nil, err
+		}
+		for _, comment := range issueComments {
+			comments = append(comments, PRCommentDetail{
+				ID:   comment.GetID(),
+				Body: comment.GetBody(),
+				Kind: "issue",
+			})
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		issueOpts.Page = resp.NextPage
+	}
+
+	reviewOpts := &github.PullRequestListCommentsOptions{ListOptions: github.ListOptions{PerPage: 100}}
+	for {
+		reviewComments, resp, err := client.PullRequests.ListComments(ctx, owner, name, number, reviewOpts)
+		if err != nil {
+			return nil, err
+		}
+		for _, comment := range reviewComments {
+			comments = append(comments, PRCommentDetail{
+				ID:   comment.GetID(),
+				Body: comment.GetBody(),
+				Kind: "review",
+			})
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		reviewOpts.Page = resp.NextPage
+	}
+
+	return comments, nil
 }
 
 // GetTagCount retrieves the total count of tags for a repository using GraphQL

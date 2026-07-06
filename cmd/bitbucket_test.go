@@ -25,6 +25,7 @@ func resetBBSViperAndEnv() {
 		"GHMV_TARGET_REPO",
 		"GHMV_MARKDOWN_TABLE",
 		"GHMV_MARKDOWN_FILE",
+		"GHMV_MISSING_PR_COMMENTS",
 		"GHMV_NO_LFS",
 	}
 	for _, env := range envVars {

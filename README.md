@@ -64,6 +64,21 @@ gh migration-validator \
   --no-lfs
 ```
 
+### Detailed Missing PR Comment Validation
+
+Use `--missing-pr-comments` to perform an opt-in comparison of pull request comments. When source PR comments are missing from the target, the report includes a count per PR and lists the source comment IDs with the first few words of each missing comment.
+
+```bash
+gh migration-validator \
+  --github-source-org "source-org" \
+  --github-target-org "target-org" \
+  --source-repo "my-repo" \
+  --target-repo "my-repo" \
+  --github-source-pat "ghp_xxx" \
+  --github-target-pat "ghp_yyy" \
+  --missing-pr-comments
+```
+
 ### Environment Variables
 
 You can use environment variables instead of flags. All environment variables use the `GHMV_` prefix.
@@ -92,6 +107,7 @@ export GHMV_TARGET_HOSTNAME="https://github.example.com"  # Optional: GitHub Ent
 export GHMV_MARKDOWN_TABLE="true"                  # Output as markdown table
 export GHMV_MARKDOWN_FILE="validation-report.md"   # Write markdown to file
 export GHMV_NO_LFS="true"                          # Skip LFS validation
+export GHMV_MISSING_PR_COMMENTS="true"             # Report missing PR comments with IDs/previews
 export GHMV_STRICT_EXIT="true"                     # Exit code 2 on validation failures
 export GHMV_RATE_LIMIT_THRESHOLD="100"             # GitHub API rate limit warning threshold (default: 50, 0 to disable)
 ```
@@ -492,6 +508,7 @@ The tool compares the following metrics between source and target repositories:
 
 - **Issues**: Total count (expects +1 in target for migration log issue)
 - **Pull Requests**: Total, Open, Merged, and Closed counts
+- **Pull Request Comments**: Optional missing comment details by PR with `--missing-pr-comments`
 - **Tags**: Total count of Git tags
 - **Releases**: Total count of GitHub releases
 - **Commits**: Total commit count on default branch

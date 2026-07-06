@@ -210,6 +210,84 @@ func TestValidateRepositoryData_MissingData(t *testing.T) {
 	}
 }
 
+func TestValidateRepositoryData_MissingPRComments(t *testing.T) {
+	previous := viper.GetBool("MISSING_PR_COMMENTS")
+	viper.Set("MISSING_PR_COMMENTS", true)
+	defer viper.Set("MISSING_PR_COMMENTS", previous)
+
+	sourceData := &RepositoryData{
+		Owner: "source-org",
+		Name:  "test-repo",
+		PRs:   &api.PRCounts{Total: 2, Open: 1, Merged: 1, Closed: 0},
+		PRComments: map[int][]api.PRCommentDetail{
+			1: {
+				{ID: 101, Kind: "issue", Body: "This comment was migrated successfully"},
+				{ID: 102, Kind: "review", Body: "This review comment did not migrate"},
+			},
+			2: {
+				{ID: 201, Kind: "issue", Body: "Another missing discussion comment with extra words"},
+			},
+		},
+	}
+	targetData := &RepositoryData{
+		Owner: "target-org",
+		Name:  "test-repo",
+		PRs:   &api.PRCounts{Total: 2, Open: 1, Merged: 1, Closed: 0},
+		PRComments: map[int][]api.PRCommentDetail{
+			1: {
+				{ID: 901, Kind: "issue", Body: "This comment was migrated successfully"},
+			},
+		},
+	}
+
+	validator := setupTestValidator(sourceData, targetData)
+	results := validator.validateRepositoryData(ValidationOptions{SkipIssues: true, SkipReleases: true, SkipLFS: true})
+
+	var commentResult *ValidationResult
+	for i := range results {
+		if results[i].Metric == "Pull Request Comments" {
+			commentResult = &results[i]
+			break
+		}
+	}
+
+	if assert.NotNil(t, commentResult, "Should include PR comment validation when enabled") {
+		assert.Equal(t, ValidationStatusFail, commentResult.StatusType)
+		assert.Equal(t, 3, commentResult.SourceVal)
+		assert.Equal(t, 1, commentResult.TargetVal)
+		assert.Equal(t, 2, commentResult.Difference)
+		assert.Equal(t, []string{
+			`PR #1: 1 missing (review 102 "This review comment did not migrate")`,
+			`PR #2: 1 missing (issue 201 "Another missing discussion comment with extra words")`,
+		}, commentResult.Details)
+	}
+}
+
+func TestValidateRepositoryData_PRCommentsSkippedByDefault(t *testing.T) {
+	previous := viper.GetBool("MISSING_PR_COMMENTS")
+	viper.Set("MISSING_PR_COMMENTS", false)
+	defer viper.Set("MISSING_PR_COMMENTS", previous)
+
+	sourceData := &RepositoryData{
+		Owner:      "source-org",
+		Name:       "test-repo",
+		PRs:        &api.PRCounts{Total: 1, Open: 0, Merged: 1, Closed: 0},
+		PRComments: map[int][]api.PRCommentDetail{1: {{ID: 101, Kind: "issue", Body: "missing"}}},
+	}
+	targetData := &RepositoryData{
+		Owner:      "target-org",
+		Name:       "test-repo",
+		PRs:        &api.PRCounts{Total: 1, Open: 0, Merged: 1, Closed: 0},
+		PRComments: map[int][]api.PRCommentDetail{},
+	}
+
+	validator := setupTestValidator(sourceData, targetData)
+	results := validator.validateRepositoryData(ValidationOptions{SkipIssues: true, SkipReleases: true, SkipLFS: true})
+	for _, result := range results {
+		assert.NotEqual(t, "Pull Request Comments", result.Metric)
+	}
+}
+
 func TestValidateRepositoryData_ExtraData(t *testing.T) {
 	sourceData := &RepositoryData{
 		Owner:                 "source-org",
