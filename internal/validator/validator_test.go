@@ -303,6 +303,12 @@ func TestValidateRepositoryData_PRCommentsSkippedByDefault(t *testing.T) {
 	}
 }
 
+func TestCommentPreviewTruncatesToMaxWords(t *testing.T) {
+	body := "one two three four five six seven eight nine ten"
+
+	assert.Equal(t, "one two three four five six seven eight", commentPreview(body))
+}
+
 func TestValidateRepositoryData_ExtraData(t *testing.T) {
 	sourceData := &RepositoryData{
 		Owner:                 "source-org",
