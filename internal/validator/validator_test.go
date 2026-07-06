@@ -312,7 +312,7 @@ func TestCommentPreview(t *testing.T) {
 		{name: "empty", body: "", want: ""},
 		{name: "single word", body: "one", want: "one"},
 		{name: "exact max words", body: "one two three four five six seven eight", want: "one two three four five six seven eight"},
-		{name: "truncates over max words", body: "one two three four five six seven eight nine ten", want: "one two three four five six seven eight"},
+		{name: "truncates over max words", body: "one two three four five six seven eight nine ten", want: "one two three four five six seven eight..."},
 		{name: "normalizes whitespace", body: " one\ttwo\nthree  four ", want: "one two three four"},
 	}
 

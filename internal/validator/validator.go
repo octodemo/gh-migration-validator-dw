@@ -619,6 +619,7 @@ func missingPRCommentsForPR(source, target []api.PRCommentDetail) []api.PRCommen
 }
 
 func commentComparisonKey(comment api.PRCommentDetail) string {
+	// Normalize whitespace in the body and use a null byte separator to avoid collisions with comment kind text.
 	return comment.Kind + "\x00" + strings.Join(strings.Fields(comment.Body), " ")
 }
 
@@ -627,10 +628,15 @@ func commentPreview(body string) string {
 	if len(words) == 0 {
 		return ""
 	}
-	if len(words) > maxCommentPreviewWords {
+	truncated := len(words) > maxCommentPreviewWords
+	if truncated {
 		words = words[:maxCommentPreviewWords]
 	}
-	return strings.Join(words, " ")
+	preview := strings.Join(words, " ")
+	if truncated {
+		return preview + "..."
+	}
+	return preview
 }
 
 // validateRepositoryData compares source and target repository data with configurable options.
