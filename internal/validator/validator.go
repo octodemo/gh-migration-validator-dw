@@ -675,7 +675,7 @@ func formatCommentDetail(comment api.PRCommentDetail, linkLabel string) string {
 }
 
 func commentComparisonKey(comment api.PRCommentDetail) string {
-	// Normalize whitespace in the body and use a null byte separator to avoid collisions with comment kind text.
+	// Normalize whitespace in the body and use an explicit null byte separator to avoid collisions with comment kind text.
 	return comment.Kind + "\x00" + strings.Join(strings.Fields(comment.Body), " ")
 }
 
@@ -683,7 +683,7 @@ func compareIssueDeltas(source, target []api.IssueDetail, allowMigrationLogIssue
 	missing := missingIssues(source, target)
 	extra := missingIssues(target, source)
 	if allowMigrationLogIssue {
-		extra = removeExpectedMigrationLogIssue(extra, len(source), len(target), len(missing))
+		extra = removeExpectedMigrationLogIssue(extra)
 	}
 
 	var details []string
@@ -716,15 +716,11 @@ func missingIssues(source, target []api.IssueDetail) []api.IssueDetail {
 	return missing
 }
 
-func removeExpectedMigrationLogIssue(extra []api.IssueDetail, sourceCount, targetCount, missingCount int) []api.IssueDetail {
+func removeExpectedMigrationLogIssue(extra []api.IssueDetail) []api.IssueDetail {
 	for i, issue := range extra {
 		if isMigrationLogIssue(issue) {
 			return append(extra[:i], extra[i+1:]...)
 		}
-	}
-
-	if missingCount == 0 && len(extra) == MigrationLogIssueOffset && targetCount == sourceCount+MigrationLogIssueOffset {
-		return nil
 	}
 
 	return extra

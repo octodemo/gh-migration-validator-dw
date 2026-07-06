@@ -211,10 +211,10 @@ func TestValidateRepositoryData_MissingData(t *testing.T) {
 	}
 }
 
-func TestValidateRepositoryData_MissingPRComments(t *testing.T) {
-	previous := viper.GetBool("MISSING_PR_COMMENTS")
-	viper.Set("MISSING_PR_COMMENTS", true)
-	defer viper.Set("MISSING_PR_COMMENTS", previous)
+func TestValidateRepositoryData_MissingPRCommentsWithIncludeDelta(t *testing.T) {
+	previous := viper.GetBool("INCLUDE_DELTA")
+	viper.Set("INCLUDE_DELTA", true)
+	defer viper.Set("INCLUDE_DELTA", previous)
 
 	sourceData := &RepositoryData{
 		Owner: "source-org",
