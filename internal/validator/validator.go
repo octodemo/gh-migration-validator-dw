@@ -618,6 +618,7 @@ func comparePRComments(source, target map[int]api.PRCommentDetails) (int, int, i
 	var missingTotal int
 	var extraTotal int
 	var details []string
+	now := time.Now()
 
 	prNumberSet := make(map[int]struct{}, len(source)+len(target))
 	for prNumber := range source {
@@ -655,7 +656,7 @@ func comparePRComments(source, target map[int]api.PRCommentDetails) (int, int, i
 			prNumber,
 			formatPRID(sourcePR.ID),
 			formatPRID(targetPR.ID),
-			formatPRAge(firstNonZeroTime(sourcePR.CreatedAt, targetPR.CreatedAt), time.Now()),
+			formatPRAge(firstNonZeroTime(sourcePR.CreatedAt, targetPR.CreatedAt), now),
 			strings.Join(detailParts, "; ")))
 	}
 
