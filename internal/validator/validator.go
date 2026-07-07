@@ -685,10 +685,7 @@ func firstNonZeroTime(first, second time.Time) time.Time {
 }
 
 func formatPRAge(createdAt, now time.Time) string {
-	if createdAt.IsZero() {
-		return "unknown"
-	}
-	if now.Before(createdAt) {
+	if createdAt.IsZero() || now.Before(createdAt) {
 		return "unknown"
 	}
 	days := int(now.Sub(createdAt).Hours() / 24)
