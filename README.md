@@ -66,7 +66,7 @@ gh migration-validator \
 
 ### Detailed Delta Validation
 
-Use `--include-delta` to perform an opt-in comparison of issues and pull request comments. When source issues or PR comments are missing from the target, the report includes source links; when target issues or PR comments are duplicated or otherwise extra, the report includes target links.
+Use `--include-delta` to perform an opt-in comparison of issues, pull requests, and comments. When source issues, pull requests, issue comments, or PR comments are missing from the target, the report includes source links; when target items are duplicated or otherwise extra, the report includes target links.
 
 ```bash
 gh migration-validator \
@@ -508,7 +508,7 @@ The tool compares the following metrics between source and target repositories:
 
 - **Issues**: Total count (expects +1 in target for migration log issue)
 - **Pull Requests**: Total, Open, Merged, and Closed counts
-- **Issues and Pull Request Comments**: Optional missing/extra delta details with source or target links using `--include-delta`
+- **Issues, Pull Requests, and Comments**: Optional missing/extra delta details with source or target links using `--include-delta`
 - **Tags**: Total count of Git tags
 - **Releases**: Total count of GitHub releases
 - **Commits**: Total commit count on default branch

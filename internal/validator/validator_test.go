@@ -337,6 +337,51 @@ func TestValidateRepositoryData_ExtraPRComments(t *testing.T) {
 	}
 }
 
+func TestValidateRepositoryData_PRDeltasWithIncludeDelta(t *testing.T) {
+	previous := viper.GetBool("INCLUDE_DELTA")
+	viper.Set("INCLUDE_DELTA", true)
+	defer viper.Set("INCLUDE_DELTA", previous)
+
+	sourceData := &RepositoryData{
+		Owner: "source-org",
+		Name:  "test-repo",
+		PRs:   &api.PRCounts{Total: 2, Open: 1, Merged: 1, Closed: 0},
+		PRComments: map[int]api.PRCommentDetails{
+			1: {ID: 1001, Number: 1, Title: "Migrated PR", State: "merged", URL: "https://source.example/pull/1"},
+			2: {ID: 1002, Number: 2, Title: "Missing PR", State: "open", URL: "https://source.example/pull/2"},
+		},
+	}
+	targetData := &RepositoryData{
+		Owner: "target-org",
+		Name:  "test-repo",
+		PRs:   &api.PRCounts{Total: 2, Open: 1, Merged: 0, Closed: 1},
+		PRComments: map[int]api.PRCommentDetails{
+			1: {ID: 9001, Number: 1, Title: "Migrated PR", State: "merged", URL: "https://target.example/pull/1"},
+			3: {ID: 9003, Number: 3, Title: "Extra PR", State: "closed", URL: "https://target.example/pull/3"},
+		},
+	}
+
+	validator := setupTestValidator(sourceData, targetData)
+	results := validator.validateRepositoryData(ValidationOptions{SkipIssues: true, SkipReleases: true, SkipLFS: true})
+
+	var prResult *ValidationResult
+	for i := range results {
+		if results[i].Metric == "Pull Requests (Total)" {
+			prResult = &results[i]
+			break
+		}
+	}
+
+	if assert.NotNil(t, prResult, "Should find PR validation result") {
+		assert.Equal(t, ValidationStatusFail, prResult.StatusType)
+		assert.Equal(t, 1, prResult.Difference)
+		assert.Equal(t, []string{
+			`1 missing (#2 (ID 1002) [open] "Missing PR" (source: https://source.example/pull/2))`,
+			`1 extra (#3 (ID 9003) [closed] "Extra PR" (target: https://target.example/pull/3))`,
+		}, prResult.Details)
+	}
+}
+
 func TestValidateRepositoryData_IssueDeltas(t *testing.T) {
 	previous := viper.GetBool("INCLUDE_DELTA")
 	viper.Set("INCLUDE_DELTA", true)
@@ -375,6 +420,72 @@ func TestValidateRepositoryData_IssueDeltas(t *testing.T) {
 		`1 missing (#2 (ID 102) "Bug two" (source: https://source.example/issues/2))`,
 		`1 extra (#3 (ID 903) "Bug one" (target: https://target.example/issues/3))`,
 	}, issueResult.Details)
+}
+
+func TestValidateRepositoryData_IssueCommentDeltas(t *testing.T) {
+	previous := viper.GetBool("INCLUDE_DELTA")
+	viper.Set("INCLUDE_DELTA", true)
+	defer viper.Set("INCLUDE_DELTA", previous)
+
+	sourceData := &RepositoryData{
+		Owner:  "source-org",
+		Name:   "test-repo",
+		Issues: 1,
+		IssueDetails: []api.IssueDetail{
+			{
+				ID:     101,
+				Number: 1,
+				Title:  "Bug one",
+				Body:   "same body",
+				URL:    "https://source.example/issues/1",
+				Comments: []api.CommentDetail{
+					{ID: 201, Kind: "issue", Body: "Shared issue comment"},
+					{ID: 202, Kind: "issue", Body: "Missing source issue comment", URL: "https://source.example/issues/1#issuecomment-202"},
+				},
+			},
+		},
+		PRs: &api.PRCounts{Total: 0, Open: 0, Merged: 0, Closed: 0},
+	}
+	targetData := &RepositoryData{
+		Owner:  "target-org",
+		Name:   "test-repo",
+		Issues: 1,
+		IssueDetails: []api.IssueDetail{
+			{
+				ID:     901,
+				Number: 1,
+				Title:  "Bug one",
+				Body:   "same body",
+				URL:    "https://target.example/issues/1",
+				Comments: []api.CommentDetail{
+					{ID: 901, Kind: "issue", Body: "Shared issue comment"},
+					{ID: 902, Kind: "issue", Body: "Extra target issue comment", URL: "https://target.example/issues/1#issuecomment-902"},
+				},
+			},
+		},
+		PRs: &api.PRCounts{Total: 0, Open: 0, Merged: 0, Closed: 0},
+	}
+
+	validator := setupTestValidator(sourceData, targetData)
+	results := validator.validateRepositoryData(ValidationOptions{SkipMigrationLogOffset: true, SkipReleases: true, SkipLFS: true})
+
+	var commentResult *ValidationResult
+	for i := range results {
+		if results[i].Metric == "Issue Comments" {
+			commentResult = &results[i]
+			break
+		}
+	}
+
+	if assert.NotNil(t, commentResult, "Should include issue comment validation when include-delta is enabled") {
+		assert.Equal(t, ValidationStatusFail, commentResult.StatusType)
+		assert.Equal(t, 2, commentResult.SourceVal)
+		assert.Equal(t, 2, commentResult.TargetVal)
+		assert.Equal(t, 1, commentResult.Difference)
+		assert.Equal(t, []string{
+			`Issue #1 (source ID 101, target ID 901): 1 missing (issue 202 "Missing source issue comment" (source: https://source.example/issues/1#issuecomment-202)); 1 extra (issue 902 "Extra target issue comment" (target: https://target.example/issues/1#issuecomment-902))`,
+		}, commentResult.Details)
+	}
 }
 
 func TestValidateRepositoryData_PRCommentsSkippedByDefault(t *testing.T) {
