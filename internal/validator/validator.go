@@ -689,7 +689,7 @@ func formatPRAge(createdAt, now time.Time) string {
 		return "unknown"
 	}
 	if now.Before(createdAt) {
-		return "0d"
+		return "unknown"
 	}
 	days := int(now.Sub(createdAt).Hours() / 24)
 	return fmt.Sprintf("%dd", days)
