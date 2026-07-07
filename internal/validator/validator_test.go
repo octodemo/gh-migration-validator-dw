@@ -538,7 +538,7 @@ func TestFormatPRAge(t *testing.T) {
 
 	assert.Equal(t, "2d", formatPRAge(now.Add(-49*time.Hour), now))
 	assert.Equal(t, "3d", formatPRAge(now.Add(-73*time.Hour), now))
-	assert.Equal(t, "unknown", formatPRAge(now.Add(time.Hour), now))
+	assert.Equal(t, "future", formatPRAge(now.Add(time.Hour), now))
 	assert.Equal(t, "unknown", formatPRAge(time.Time{}, now))
 }
 
