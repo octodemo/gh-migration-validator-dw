@@ -692,8 +692,15 @@ func formatPRAge(createdAt, now time.Time) string {
 	if now.Before(createdAt) {
 		return "future"
 	}
-	days := int(now.Sub(createdAt).Hours() / 24)
+	createdDate := dateOnlyUTC(createdAt)
+	nowDate := dateOnlyUTC(now)
+	days := int(nowDate.Sub(createdDate).Hours() / 24)
 	return fmt.Sprintf("%dd", days)
+}
+
+func dateOnlyUTC(t time.Time) time.Time {
+	t = t.UTC()
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 func missingComments(source, target []api.CommentDetail) []api.CommentDetail {
