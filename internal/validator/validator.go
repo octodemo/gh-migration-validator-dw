@@ -9,6 +9,7 @@ import (
 	"mona-actions/gh-migration-validator/internal/output"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,8 @@ const ValidationStatusMessageInfo = "ℹ️ INFO"
 // MigrationLogIssueOffset represents the additional issue created during migration
 const MigrationLogIssueOffset = 1
 
+const maxCommentPreviewWords = 8
+
 // getValidationStatus returns both display string and enum value based on difference
 // diff > 0: target has fewer items than source (FAIL)
 // diff < 0: target has more items than source (WARN)
@@ -58,7 +61,9 @@ type RepositoryData struct {
 	Owner                 string
 	Name                  string
 	Issues                int
+	IssueDetails          []api.IssueDetail
 	PRs                   *api.PRCounts
+	PRComments            map[int]api.PRCommentDetails
 	Tags                  int
 	Releases              int
 	CommitCount           int
@@ -77,6 +82,7 @@ type ValidationResult struct {
 	Status     string           // "✅ PASS", "❌ FAIL", "⚠️ WARN" - for display
 	StatusType ValidationStatus // Pass, Fail, Warn - for logic/testing
 	Difference int              // How many items are missing in target (negative if target has more)
+	Details    []string         // Optional detail lines for validations that need extra context
 }
 
 // HasFailures reports whether any validation result failed so callers can set exit codes accurately.
@@ -102,6 +108,7 @@ type ValidationOptions struct {
 	SkipIssues                bool   // BBS has no native issues
 	SkipReleases              bool   // BBS has no releases
 	SkipLFS                   bool   // Skip LFS validation
+	SkipPRComments            bool   // Skip detailed PR comment validation
 	SkipMigrationLogOffset    bool   // Don't add +1 for migration log issue
 	SkipMigrationArchive      bool   // Skip migration archive comparisons (non-GitHub sources)
 	BranchPermissionsAdvisory bool   // Show as INFO instead of PASS/FAIL
@@ -256,6 +263,30 @@ func (mv *MigrationValidator) retrieveSource(owner, name string, spinner *pterm.
 		successfulRequests++
 	}
 
+	if includeDeltaEnabled() {
+		spinner.UpdateText(fmt.Sprintf("Fetching issue details and comments from %s/%s...", owner, name))
+		issueDetails, err := mv.api.GetIssueDetails(api.SourceClient, owner, name)
+		if err != nil {
+			failedRequests = append(failedRequests, "issue details")
+			errorMessages = append(errorMessages, fmt.Sprintf("issue details: %v", err))
+			mv.SourceData.IssueDetails = nil
+		} else {
+			mv.SourceData.IssueDetails = issueDetails
+			successfulRequests++
+		}
+
+		spinner.UpdateText(fmt.Sprintf("Fetching pull request comments from %s/%s...", owner, name))
+		prComments, err := mv.api.GetPRCommentDetails(api.SourceClient, owner, name)
+		if err != nil {
+			failedRequests = append(failedRequests, "pull request comments")
+			errorMessages = append(errorMessages, fmt.Sprintf("pull request comments: %v", err))
+			mv.SourceData.PRComments = nil
+		} else {
+			mv.SourceData.PRComments = prComments
+			successfulRequests++
+		}
+	}
+
 	// Get tag count
 	spinner.UpdateText(fmt.Sprintf("Fetching tags from %s/%s...", owner, name))
 	tags, err := mv.api.GetTagCount(api.SourceClient, owner, name)
@@ -378,6 +409,13 @@ func (mv *MigrationValidator) SetSourceDataFromExport(exportData *RepositoryData
 		sourceDataCopy.PRs = &prCountsCopy
 	}
 
+	if exportData.PRComments != nil {
+		sourceDataCopy.PRComments = clonePRComments(exportData.PRComments)
+	}
+	if exportData.IssueDetails != nil {
+		sourceDataCopy.IssueDetails = cloneIssueDetails(exportData.IssueDetails)
+	}
+
 	mv.SourceData = &sourceDataCopy
 }
 
@@ -497,6 +535,402 @@ func (mv *MigrationValidator) ValidateWithOptions(targetOwner, targetRepo string
 	return results, nil
 }
 
+func clonePRComments(comments map[int]api.PRCommentDetails) map[int]api.PRCommentDetails {
+	clone := make(map[int]api.PRCommentDetails, len(comments))
+	for prNumber, prComments := range comments {
+		commentsCopy := prComments
+		commentsCopy.Comments = append([]api.PRCommentDetail(nil), prComments.Comments...)
+		clone[prNumber] = commentsCopy
+	}
+
+	return clone
+}
+
+func cloneIssueDetails(issues []api.IssueDetail) []api.IssueDetail {
+	clone := append([]api.IssueDetail(nil), issues...)
+	for i := range clone {
+		clone[i].Comments = append([]api.CommentDetail(nil), issues[i].Comments...)
+	}
+
+	return clone
+}
+
+func includeDeltaEnabled() bool {
+	return viper.GetBool("INCLUDE_DELTA")
+}
+
+func comparePRDeltas(source, target map[int]api.PRCommentDetails) (int, int, []string) {
+	missing := missingPRs(source, target)
+	extra := missingPRs(target, source)
+
+	var details []string
+	if len(missing) > 0 {
+		details = append(details, fmt.Sprintf("%d missing (%s)", len(missing), formatPRDetails(missing, "source")))
+	}
+	if len(extra) > 0 {
+		details = append(details, fmt.Sprintf("%d extra (%s)", len(extra), formatPRDetails(extra, "target")))
+	}
+
+	return len(missing), len(extra), details
+}
+
+func missingPRs(source, target map[int]api.PRCommentDetails) []api.PRCommentDetails {
+	numbers := make([]int, 0, len(source))
+	for prNumber := range source {
+		numbers = append(numbers, prNumber)
+	}
+	sort.Ints(numbers)
+
+	var missing []api.PRCommentDetails
+	for _, prNumber := range numbers {
+		if _, ok := target[prNumber]; ok {
+			continue
+		}
+		missing = append(missing, source[prNumber])
+	}
+
+	return missing
+}
+
+func formatPRDetails(prs []api.PRCommentDetails, linkLabel string) string {
+	detailParts := make([]string, 0, len(prs))
+	for _, pr := range prs {
+		detailParts = append(detailParts, formatPRDetail(pr, linkLabel))
+	}
+	return strings.Join(detailParts, "; ")
+}
+
+func formatPRDetail(pr api.PRCommentDetails, linkLabel string) string {
+	link := ""
+	if pr.URL != "" {
+		link = fmt.Sprintf(" (%s: %s)", linkLabel, pr.URL)
+	}
+	state := ""
+	if pr.State != "" {
+		state = fmt.Sprintf(" [%s]", pr.State)
+	}
+	return fmt.Sprintf("#%d (ID %s)%s %q%s", pr.Number, formatPRID(pr.ID), state, commentPreview(pr.Title), link)
+}
+
+func comparePRComments(source, target map[int]api.PRCommentDetails) (int, int, int, int, []string) {
+	sourceTotal := countPRComments(source)
+	targetTotal := countPRComments(target)
+	var missingTotal int
+	var extraTotal int
+	var details []string
+	now := time.Now()
+
+	prNumberSet := make(map[int]struct{}, len(source)+len(target))
+	for prNumber := range source {
+		prNumberSet[prNumber] = struct{}{}
+	}
+	for prNumber := range target {
+		prNumberSet[prNumber] = struct{}{}
+	}
+
+	prNumbers := make([]int, 0, len(prNumberSet))
+	for prNumber := range prNumberSet {
+		prNumbers = append(prNumbers, prNumber)
+	}
+	sort.Ints(prNumbers)
+
+	for _, prNumber := range prNumbers {
+		sourcePR := source[prNumber]
+		targetPR := target[prNumber]
+		missing := missingComments(sourcePR.Comments, targetPR.Comments)
+		extra := missingComments(targetPR.Comments, sourcePR.Comments)
+		if len(missing) == 0 && len(extra) == 0 {
+			continue
+		}
+
+		missingTotal += len(missing)
+		extraTotal += len(extra)
+		detailParts := make([]string, 0, 2)
+		if len(missing) > 0 {
+			detailParts = append(detailParts, fmt.Sprintf("%d missing (%s)", len(missing), formatCommentDetails(missing, "source")))
+		}
+		if len(extra) > 0 {
+			detailParts = append(detailParts, fmt.Sprintf("%d extra (%s)", len(extra), formatCommentDetails(extra, "target")))
+		}
+		details = append(details, fmt.Sprintf("PR #%d (source ID %s, target ID %s, age %s): %s",
+			prNumber,
+			formatPRID(sourcePR.ID),
+			formatPRID(targetPR.ID),
+			formatPRAge(firstNonZeroTime(sourcePR.CreatedAt, targetPR.CreatedAt), now),
+			strings.Join(detailParts, "; ")))
+	}
+
+	return sourceTotal, targetTotal, missingTotal, extraTotal, details
+}
+
+func countPRComments(comments map[int]api.PRCommentDetails) int {
+	var total int
+	for _, prDetails := range comments {
+		total += len(prDetails.Comments)
+	}
+	return total
+}
+
+func formatPRID(id int64) string {
+	if id == 0 {
+		return "not found"
+	}
+	return fmt.Sprintf("%d", id)
+}
+
+func firstNonZeroTime(first, second time.Time) time.Time {
+	if !first.IsZero() {
+		return first
+	}
+	return second
+}
+
+func formatPRAge(createdAt, now time.Time) string {
+	if createdAt.IsZero() {
+		return "unknown"
+	}
+	if now.Before(createdAt) {
+		return "future"
+	}
+	createdDate := dateOnlyUTC(createdAt)
+	nowDate := dateOnlyUTC(now)
+	days := int(nowDate.Sub(createdDate).Hours() / 24)
+	return fmt.Sprintf("%dd", days)
+}
+
+func dateOnlyUTC(t time.Time) time.Time {
+	t = t.UTC()
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+func missingComments(source, target []api.CommentDetail) []api.CommentDetail {
+	targetCounts := make(map[string]int, len(target))
+	for _, comment := range target {
+		targetCounts[commentComparisonKey(comment)]++
+	}
+
+	var missing []api.CommentDetail
+	for _, comment := range source {
+		key := commentComparisonKey(comment)
+		if targetCounts[key] > 0 {
+			targetCounts[key]--
+			continue
+		}
+		missing = append(missing, comment)
+	}
+
+	return missing
+}
+
+func formatCommentDetails(comments []api.CommentDetail, linkLabel string) string {
+	detailParts := make([]string, 0, len(comments))
+	for _, comment := range comments {
+		detailParts = append(detailParts, formatCommentDetail(comment, linkLabel))
+	}
+	return strings.Join(detailParts, "; ")
+}
+
+func formatCommentDetail(comment api.CommentDetail, linkLabel string) string {
+	link := ""
+	if comment.URL != "" {
+		link = fmt.Sprintf(" (%s: %s)", linkLabel, comment.URL)
+	}
+	return fmt.Sprintf("%s %d %q%s", comment.Kind, comment.ID, commentPreview(comment.Body), link)
+}
+
+func commentComparisonKey(comment api.CommentDetail) string {
+	// Normalize whitespace in the body and use an explicit null byte separator so kind/body boundaries stay unambiguous,
+	// including when a body starts with or contains words such as "issue" or "review".
+	return comment.Kind + "\x00" + strings.Join(strings.Fields(comment.Body), " ")
+}
+
+func compareIssueComments(source, target []api.IssueDetail) (int, int, int, int, []string) {
+	sourceTotal := countIssueComments(source)
+	targetTotal := countIssueComments(target)
+	sourceGroups := groupIssuesByComparisonKey(source)
+	targetGroups := groupIssuesByComparisonKey(target)
+
+	keySet := make(map[string]struct{}, len(sourceGroups)+len(targetGroups))
+	for key := range sourceGroups {
+		keySet[key] = struct{}{}
+	}
+	for key := range targetGroups {
+		keySet[key] = struct{}{}
+	}
+
+	keys := make([]string, 0, len(keySet))
+	for key := range keySet {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var missingTotal int
+	var extraTotal int
+	var details []string
+	for _, key := range keys {
+		sourceIssues := sourceGroups[key]
+		targetIssues := targetGroups[key]
+		for i := 0; i < max(len(sourceIssues), len(targetIssues)); i++ {
+			var sourceIssue api.IssueDetail
+			var targetIssue api.IssueDetail
+			if i < len(sourceIssues) {
+				sourceIssue = sourceIssues[i]
+			}
+			if i < len(targetIssues) {
+				targetIssue = targetIssues[i]
+			}
+
+			missing := missingComments(sourceIssue.Comments, targetIssue.Comments)
+			extra := missingComments(targetIssue.Comments, sourceIssue.Comments)
+			if len(missing) == 0 && len(extra) == 0 {
+				continue
+			}
+
+			missingTotal += len(missing)
+			extraTotal += len(extra)
+			detailParts := make([]string, 0, 2)
+			if len(missing) > 0 {
+				detailParts = append(detailParts, fmt.Sprintf("%d missing (%s)", len(missing), formatCommentDetails(missing, "source")))
+			}
+			if len(extra) > 0 {
+				detailParts = append(detailParts, fmt.Sprintf("%d extra (%s)", len(extra), formatCommentDetails(extra, "target")))
+			}
+			details = append(details, fmt.Sprintf("Issue #%d (source ID %s, target ID %s): %s",
+				firstNonZeroInt(sourceIssue.Number, targetIssue.Number),
+				formatIssueID(sourceIssue.ID),
+				formatIssueID(targetIssue.ID),
+				strings.Join(detailParts, "; ")))
+		}
+	}
+
+	return sourceTotal, targetTotal, missingTotal, extraTotal, details
+}
+
+func countIssueComments(issues []api.IssueDetail) int {
+	var total int
+	for _, issue := range issues {
+		total += len(issue.Comments)
+	}
+	return total
+}
+
+func groupIssuesByComparisonKey(issues []api.IssueDetail) map[string][]api.IssueDetail {
+	groups := make(map[string][]api.IssueDetail, len(issues))
+	for _, issue := range issues {
+		key := issueComparisonKey(issue)
+		groups[key] = append(groups[key], issue)
+	}
+	for key := range groups {
+		sort.Slice(groups[key], func(i, j int) bool {
+			return groups[key][i].Number < groups[key][j].Number
+		})
+	}
+	return groups
+}
+
+func formatIssueID(id int64) string {
+	if id == 0 {
+		return "not found"
+	}
+	return fmt.Sprintf("%d", id)
+}
+
+func firstNonZeroInt(first, second int) int {
+	if first != 0 {
+		return first
+	}
+	return second
+}
+
+func compareIssueDeltas(source, target []api.IssueDetail, allowMigrationLogIssue bool) (int, int, []string) {
+	missing := missingIssues(source, target)
+	extra := missingIssues(target, source)
+	if allowMigrationLogIssue {
+		extra = removeExpectedMigrationLogIssue(extra)
+	}
+
+	var details []string
+	if len(missing) > 0 {
+		details = append(details, fmt.Sprintf("%d missing (%s)", len(missing), formatIssueDetails(missing, "source")))
+	}
+	if len(extra) > 0 {
+		details = append(details, fmt.Sprintf("%d extra (%s)", len(extra), formatIssueDetails(extra, "target")))
+	}
+
+	return len(missing), len(extra), details
+}
+
+func missingIssues(source, target []api.IssueDetail) []api.IssueDetail {
+	targetCounts := make(map[string]int, len(target))
+	for _, issue := range target {
+		targetCounts[issueComparisonKey(issue)]++
+	}
+
+	var missing []api.IssueDetail
+	for _, issue := range source {
+		key := issueComparisonKey(issue)
+		if targetCounts[key] > 0 {
+			targetCounts[key]--
+			continue
+		}
+		missing = append(missing, issue)
+	}
+
+	return missing
+}
+
+func removeExpectedMigrationLogIssue(extra []api.IssueDetail) []api.IssueDetail {
+	// The standard issue count allows exactly one migration log issue, so remove only one match;
+	// duplicate migration log issues should remain visible as extra target issues.
+	for i, issue := range extra {
+		if isMigrationLogIssue(issue) {
+			return append(extra[:i], extra[i+1:]...)
+		}
+	}
+
+	return extra
+}
+
+func isMigrationLogIssue(issue api.IssueDetail) bool {
+	return strings.Contains(strings.ToLower(issue.Title), "migration log")
+}
+
+func formatIssueDetails(issues []api.IssueDetail, linkLabel string) string {
+	detailParts := make([]string, 0, len(issues))
+	for _, issue := range issues {
+		detailParts = append(detailParts, formatIssueDetail(issue, linkLabel))
+	}
+	return strings.Join(detailParts, "; ")
+}
+
+func formatIssueDetail(issue api.IssueDetail, linkLabel string) string {
+	link := ""
+	if issue.URL != "" {
+		link = fmt.Sprintf(" (%s: %s)", linkLabel, issue.URL)
+	}
+	return fmt.Sprintf("#%d (ID %d) %q%s", issue.Number, issue.ID, commentPreview(issue.Title), link)
+}
+
+func issueComparisonKey(issue api.IssueDetail) string {
+	return strings.Join(strings.Fields(issue.Title), " ") + "\x00" + strings.Join(strings.Fields(issue.Body), " ")
+}
+
+func commentPreview(body string) string {
+	words := strings.Fields(body)
+	if len(words) == 0 {
+		return ""
+	}
+	truncated := len(words) > maxCommentPreviewWords
+	if truncated {
+		words = words[:maxCommentPreviewWords]
+	}
+	preview := strings.Join(words, " ")
+	if truncated {
+		return preview + "..."
+	}
+	return preview
+}
+
 // validateRepositoryData compares source and target repository data with configurable options.
 // Pass ValidationOptions when needed — zero-value options produce GitHub-to-GitHub defaults.
 func (mv *MigrationValidator) validateRepositoryData(opts ValidationOptions) []ValidationResult {
@@ -514,6 +948,24 @@ func (mv *MigrationValidator) validateRepositoryData(opts ValidationOptions) []V
 		}
 		issueDiff := expectedTargetIssues - mv.TargetData.Issues
 		issueStatus, issueStatusType := getValidationStatus(issueDiff)
+		issueDetails := []string(nil)
+		if includeDeltaEnabled() && mv.SourceData.IssueDetails != nil && mv.TargetData.IssueDetails != nil {
+			missingIssues, extraIssues, details := compareIssueDeltas(
+				mv.SourceData.IssueDetails,
+				mv.TargetData.IssueDetails,
+				!opts.SkipMigrationLogOffset,
+			)
+			issueDetails = details
+			if missingIssues > 0 {
+				issueStatus = ValidationStatusMessageFail
+				issueStatusType = ValidationStatusFail
+				issueDiff = missingIssues
+			} else if extraIssues > 0 {
+				issueStatus = ValidationStatusMessageWarn
+				issueStatusType = ValidationStatusWarn
+				issueDiff = -extraIssues
+			}
+		}
 
 		results = append(results, ValidationResult{
 			Metric:     metricLabel,
@@ -522,12 +974,53 @@ func (mv *MigrationValidator) validateRepositoryData(opts ValidationOptions) []V
 			Status:     issueStatus,
 			StatusType: issueStatusType,
 			Difference: issueDiff,
+			Details:    issueDetails,
 		})
+
+		if includeDeltaEnabled() && mv.SourceData.IssueDetails != nil && mv.TargetData.IssueDetails != nil {
+			sourceComments, targetComments, missingComments, extraComments, details := compareIssueComments(mv.SourceData.IssueDetails, mv.TargetData.IssueDetails)
+			commentStatus := ValidationStatusMessagePass
+			commentStatusType := ValidationStatusPass
+			commentDiff := 0
+			if missingComments > 0 {
+				commentStatus = ValidationStatusMessageFail
+				commentStatusType = ValidationStatusFail
+				commentDiff = missingComments
+			} else if extraComments > 0 {
+				commentStatus = ValidationStatusMessageWarn
+				commentStatusType = ValidationStatusWarn
+				commentDiff = -extraComments
+			}
+
+			results = append(results, ValidationResult{
+				Metric:     "Issue Comments",
+				SourceVal:  sourceComments,
+				TargetVal:  targetComments,
+				Status:     commentStatus,
+				StatusType: commentStatusType,
+				Difference: commentDiff,
+				Details:    details,
+			})
+		}
 	}
 
 	// Compare Total PRs
 	prDiff := mv.SourceData.PRs.Total - mv.TargetData.PRs.Total
 	prStatus, prStatusType := getValidationStatus(prDiff)
+	prDetails := []string(nil)
+	if includeDeltaEnabled() && mv.SourceData.PRComments != nil && mv.TargetData.PRComments != nil {
+		missingPRs, extraPRs, details := comparePRDeltas(mv.SourceData.PRComments, mv.TargetData.PRComments)
+		prDetails = details
+		if missingPRs > 0 {
+			prStatus = ValidationStatusMessageFail
+			prStatusType = ValidationStatusFail
+			prDiff = missingPRs
+		} else if extraPRs > 0 {
+			prStatus = ValidationStatusMessageWarn
+			prStatusType = ValidationStatusWarn
+			prDiff = -extraPRs
+		}
+	}
 
 	results = append(results, ValidationResult{
 		Metric:     "Pull Requests (Total)",
@@ -536,7 +1029,34 @@ func (mv *MigrationValidator) validateRepositoryData(opts ValidationOptions) []V
 		Status:     prStatus,
 		StatusType: prStatusType,
 		Difference: prDiff,
+		Details:    prDetails,
 	})
+
+	if includeDeltaEnabled() && !opts.SkipPRComments && mv.SourceData.PRComments != nil && mv.TargetData.PRComments != nil {
+		sourceComments, targetComments, missingComments, extraComments, details := comparePRComments(mv.SourceData.PRComments, mv.TargetData.PRComments)
+		commentStatus := ValidationStatusMessagePass
+		commentStatusType := ValidationStatusPass
+		commentDiff := 0
+		if missingComments > 0 {
+			commentStatus = ValidationStatusMessageFail
+			commentStatusType = ValidationStatusFail
+			commentDiff = missingComments
+		} else if extraComments > 0 {
+			commentStatus = ValidationStatusMessageWarn
+			commentStatusType = ValidationStatusWarn
+			commentDiff = -extraComments
+		}
+
+		results = append(results, ValidationResult{
+			Metric:     "Pull Request Comments",
+			SourceVal:  sourceComments,
+			TargetVal:  targetComments,
+			Status:     commentStatus,
+			StatusType: commentStatusType,
+			Difference: commentDiff,
+			Details:    details,
+		})
+	}
 
 	// Compare Open PRs
 	openPRDiff := mv.SourceData.PRs.Open - mv.TargetData.PRs.Open
@@ -819,6 +1339,30 @@ func (mv *MigrationValidator) retrieveTarget(owner, name string, spinner *pterm.
 		successfulRequests++
 	}
 
+	if includeDeltaEnabled() {
+		spinner.UpdateText(fmt.Sprintf("Fetching issue details and comments from %s/%s...", owner, name))
+		issueDetails, err := mv.api.GetIssueDetails(api.TargetClient, owner, name)
+		if err != nil {
+			failedRequests = append(failedRequests, "issue details")
+			errorMessages = append(errorMessages, fmt.Sprintf("issue details: %v", err))
+			mv.TargetData.IssueDetails = nil
+		} else {
+			mv.TargetData.IssueDetails = issueDetails
+			successfulRequests++
+		}
+
+		spinner.UpdateText(fmt.Sprintf("Fetching pull request comments from %s/%s...", owner, name))
+		prComments, err := mv.api.GetPRCommentDetails(api.TargetClient, owner, name)
+		if err != nil {
+			failedRequests = append(failedRequests, "pull request comments")
+			errorMessages = append(errorMessages, fmt.Sprintf("pull request comments: %v", err))
+			mv.TargetData.PRComments = nil
+		} else {
+			mv.TargetData.PRComments = prComments
+			successfulRequests++
+		}
+	}
+
 	// Get tag count
 	spinner.UpdateText(fmt.Sprintf("Fetching tags from %s/%s...", owner, name))
 	tags, err := mv.api.GetTagCount(api.TargetClient, owner, name)
@@ -1049,6 +1593,22 @@ func (mv *MigrationValidator) displayValidationTable(title string, results []Val
 	// Create and display the table
 	table := pterm.DefaultTable.WithHasHeader().WithData(tableData)
 	table.Render()
+	mv.displayValidationDetails(results)
+}
+
+func (mv *MigrationValidator) displayValidationDetails(results []ValidationResult) {
+	for _, result := range results {
+		if len(result.Details) == 0 {
+			continue
+		}
+
+		pterm.DefaultSection.Println(result.Metric + " Details")
+		for _, detail := range result.Details {
+			pterm.DefaultBulletList.WithItems([]pterm.BulletListItem{
+				{Level: 0, Text: detail},
+			}).Render()
+		}
+	}
 }
 
 // displayValidationSummary calculates and displays the overall validation summary
@@ -1156,6 +1716,24 @@ func (mv *MigrationValidator) printMarkdownTable(results []ValidationResult, opt
 			result.SourceVal,
 			result.TargetVal,
 			diffStr)
+	}
+
+	wroteDetailsHeader := false
+	for _, result := range results {
+		if len(result.Details) == 0 {
+			continue
+		}
+		if !wroteDetailsHeader {
+			fmt.Fprintln(writer)
+			fmt.Fprintln(writer, "## Details")
+			fmt.Fprintln(writer)
+			wroteDetailsHeader = true
+		}
+		fmt.Fprintf(writer, "### %s\n\n", result.Metric)
+		for _, detail := range result.Details {
+			fmt.Fprintf(writer, "- %s\n", detail)
+		}
+		fmt.Fprintln(writer)
 	}
 
 	// Calculate summary for markdown
@@ -1576,6 +2154,23 @@ func WriteOrgMarkdownReport(summary *OrgValidationSummary, writer io.Writer) {
 				result.Metric, result.Status, result.SourceVal, result.TargetVal, diffStr)
 		}
 		fmt.Fprintln(writer)
+
+		wroteDetailsHeader := false
+		for _, result := range repo.Results {
+			if len(result.Details) == 0 {
+				continue
+			}
+			if !wroteDetailsHeader {
+				fmt.Fprintln(writer, "#### Details")
+				fmt.Fprintln(writer)
+				wroteDetailsHeader = true
+			}
+			fmt.Fprintf(writer, "##### %s\n\n", result.Metric)
+			for _, detail := range result.Details {
+				fmt.Fprintf(writer, "- %s\n", detail)
+			}
+			fmt.Fprintln(writer)
+		}
 	}
 
 	// Final result

@@ -96,6 +96,7 @@ Metrics not available in Bitbucket (Issues, Releases, LFS) are automatically ski
 			SkipIssues:                true,
 			SkipReleases:              true,
 			SkipLFS:                   true,
+			SkipPRComments:            true,
 			SkipMigrationLogOffset:    true,
 			SkipMigrationArchive:      true,
 			BranchPermissionsAdvisory: true,
